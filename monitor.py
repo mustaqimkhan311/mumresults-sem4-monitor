@@ -14,16 +14,9 @@ from bs4 import BeautifulSoup
 SITE_URL = "https://www.mumresults.in/"
 
 PROGRAM_CODE = "1113161"
-TARGET_COURSE = "Master of Science(Information Technology)"
-TARGET_SEMESTER = "Semester - IV"
 
-# We specifically want the current First Half 2026 result.
+# We only monitor the current First Half 2026 section.
 TARGET_SESSION = "First Half 2026"
-
-# Do NOT alert for old supplementary results.
-EXCLUDE_WORDS = [
-    "SUPPLEMENTARY",
-]
 
 STATE_FILE = Path("state.json")
 
@@ -51,81 +44,85 @@ def fetch_page():
     return response.text
 
 
-def find_target(html):
+def find_session_table(soup):
+    """
+    Locate the table belonging to First Half 2026.
+    """
 
-    soup = BeautifulSoup(html, "html.parser")
-
-    # Find the "First Half 2026" section.
     session_heading = None
 
     for element in soup.find_all(
         ["h1", "h2", "h3", "h4", "h5", "h6", "div", "p"]
     ):
-        text = normalize(element.get_text(" ", strip=True))
+        text = normalize(
+            element.get_text(" ", strip=True)
+        )
 
         if text == normalize(TARGET_SESSION):
             session_heading = element
             break
 
     if not session_heading:
-        print(f"Session '{TARGET_SESSION}' not found.")
+        print(
+            f"Session '{TARGET_SESSION}' not found."
+        )
+        return None
 
-        return {
-            "found": False
-        }
-
-    # The results immediately following the session heading
-    # are contained in the next table.
     table = session_heading.find_next("table")
 
     if not table:
-        print("Could not find results table.")
+        print(
+            "Could not find results table."
+        )
+        return None
 
-        return {
-            "found": False
-        }
+    return table
+
+
+def find_results(html):
+
+    soup = BeautifulSoup(
+        html,
+        "html.parser"
+    )
+
+    table = find_session_table(soup)
+
+    if not table:
+        return []
+
+    results = []
 
     for row in table.find_all("tr"):
 
-        cells = row.find_all(["td", "th"])
+        cells = row.find_all(
+            ["td", "th"]
+        )
 
         if not cells:
             continue
 
         row_text = " ".join(
-            cell.get_text(" ", strip=True)
+            cell.get_text(
+                " ",
+                strip=True
+            )
             for cell in cells
         )
 
-        normalized_row = normalize(row_text)
+        normalized_row = normalize(
+            row_text
+        )
 
-        # Program code must match.
+        # PROGRAM CODE IS THE ONLY RESULT FILTER.
         if PROGRAM_CODE.lower() not in normalized_row:
             continue
 
-        # Course must match.
-        if "master of science" not in normalized_row:
-            continue
-
-        if "information technology" not in normalized_row:
-            continue
-
-        # Semester IV must match.
-        if normalize(TARGET_SEMESTER) not in normalized_row:
-            continue
-
-        # CRITICAL:
-        # Ignore Supplementary results.
-        if any(
-            word.lower() in normalized_row
-            for word in EXCLUDE_WORDS
-        ):
-            print("Matching old supplementary result ignored.")
-
-            continue
-
-        # Find result/PDF link.
-        link = row.find("a", href=True)
+        # Find the result/PDF link.
+        link = row.find(
+            "a",
+            href=True
+        )
 
         result_url = None
 
@@ -135,6 +132,7 @@ def find_target(html):
                 link["href"]
             )
 
+        # Try to identify the result date.
         result_date = None
 
         if len(cells) >= 2:
@@ -143,34 +141,40 @@ def find_target(html):
                 strip=True
             )
 
-        return {
-            "found": True,
+        result = {
             "session": TARGET_SESSION,
             "program_code": PROGRAM_CODE,
-            "course": TARGET_COURSE,
-            "semester": TARGET_SEMESTER,
-            "result_date": result_date,
             "row": row_text,
+            "result_date": result_date,
             "url": result_url,
         }
 
-    return {
-        "found": False
-    }
+        results.append(result)
+
+    return results
 
 
 def load_state():
 
     if not STATE_FILE.exists():
-        return {}
+        return {
+            "seen": []
+        }
 
     try:
-        return json.loads(
+        data = json.loads(
             STATE_FILE.read_text()
         )
 
+        if "seen" not in data:
+            data["seen"] = []
+
+        return data
+
     except Exception:
-        return {}
+        return {
+            "seen": []
+        }
 
 
 def save_state(data):
@@ -181,6 +185,15 @@ def save_state(data):
             indent=2,
             ensure_ascii=False
         )
+    )
+
+
+def create_fingerprint(result):
+
+    return json.dumps(
+        result,
+        sort_keys=True,
+        ensure_ascii=False
     )
 
 
@@ -226,7 +239,9 @@ def main():
 
         html = fetch_page()
 
-        current = find_target(html)
+        current_results = find_results(
+            html
+        )
 
     except Exception as exc:
 
@@ -237,78 +252,123 @@ def main():
 
         sys.exit(1)
 
+    print(
+        f"Found {len(current_results)} "
+        f"listing(s) for program code "
+        f"{PROGRAM_CODE} in "
+        f"{TARGET_SESSION}."
+    )
+
     previous = load_state()
 
-    if not current["found"]:
+    seen = set(
+        previous.get(
+            "seen",
+            []
+        )
+    )
+
+    new_results = []
+
+    for result in current_results:
+
+        fingerprint = create_fingerprint(
+            result
+        )
+
+        if fingerprint not in seen:
+
+            new_results.append(
+                (
+                    fingerprint,
+                    result
+                )
+            )
+
+    # First run after installing this version:
+    # establish existing listings as the baseline.
+    if not previous.get("initialized", False):
+
+        for result in current_results:
+
+            seen.add(
+                create_fingerprint(result)
+            )
+
+        save_state(
+            {
+                "initialized": True,
+                "seen": list(seen),
+            }
+        )
 
         print(
-            "Target First Half 2026 Semester IV "
-            "result is NOT currently published."
+            "Initial baseline created."
+        )
+
+        print(
+            f"{len(current_results)} existing "
+            f"listing(s) recorded."
         )
 
         return
 
-    print(
-        "TARGET FOUND:"
-    )
+    # Alert only for genuinely NEW listings.
+    if not new_results:
 
-    print(
-        json.dumps(
-            current,
-            indent=2,
-            ensure_ascii=False
+        print(
+            "No new result listing detected."
         )
-    )
 
-    fingerprint = json.dumps(
-        current,
-        sort_keys=True,
-        ensure_ascii=False
-    )
+        return
 
-    previous_fingerprint = previous.get(
-        "fingerprint"
-    )
+    for fingerprint, result in new_results:
 
-    # Alert only when this is a new/changed result.
-    if fingerprint != previous_fingerprint:
+        print(
+            "\nNEW RESULT FOUND:"
+        )
+
+        print(
+            json.dumps(
+                result,
+                indent=2,
+                ensure_ascii=False
+            )
+        )
 
         message = (
             "🚨 Mumbai University Result Alert\n\n"
-            "TARGET RESULT FOUND!\n\n"
+            "NEW RESULT FOUND!\n\n"
             f"Session: {TARGET_SESSION}\n"
             f"Program Code: {PROGRAM_CODE}\n"
-            f"Course: {TARGET_COURSE}\n"
-            f"Semester: IV\n"
             f"Result Date: "
-            f"{current.get('result_date') or 'Not shown'}\n\n"
+            f"{result.get('result_date') or 'Not shown'}\n\n"
             f"Listing: {SITE_URL}"
         )
 
-        if current.get("url"):
+        if result.get("url"):
 
             message += (
                 f"\nPDF/Result: "
-                f"{current['url']}"
+                f"{result['url']}"
             )
 
         telegram_send(message)
 
-        save_state(
-            {
-                "fingerprint": fingerprint,
-                "result": current,
-            }
+        seen.add(
+            fingerprint
         )
-
-        print("ALERT SENT.")
-
-    else:
 
         print(
-            "Target already notified. "
-            "No duplicate alert."
+            "TELEGRAM ALERT SENT."
         )
+
+    save_state(
+        {
+            "initialized": True,
+            "seen": list(seen),
+        }
+    )
 
 
 if __name__ == "__main__":
