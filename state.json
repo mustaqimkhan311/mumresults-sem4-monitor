@@ -1,12 +1,4 @@
 {
-  "fingerprint": "{\"course\": \"Master of Science(Information Technology)\", \"found\": true, \"program_code\": \"1113161\", \"result_date\": \"20/01/2026\", \"row\": \"1113161 Master of Science(Information Technology) ( Semester - IV) ( NEP 2020 ) SUPPLEMENTARY Master of Science(Information Technology) ( Semester - IV) ( NEP 2020 ) SUPPLEMENTARY (UPDATED ON 28/01/2026) 20/01/2026\", \"semester\": \"Semester - IV\", \"url\": \"https://www.mumresults.in/S25/1113161 Master of Science(Information Technology) ( Semester - IV) ( NEP 2020 ) SUPPLEMENTARY.pdf\"}",
-  "result": {
-    "found": true,
-    "program_code": "1113161",
-    "course": "Master of Science(Information Technology)",
-    "semester": "Semester - IV",
-    "row": "1113161 Master of Science(Information Technology) ( Semester - IV) ( NEP 2020 ) SUPPLEMENTARY Master of Science(Information Technology) ( Semester - IV) ( NEP 2020 ) SUPPLEMENTARY (UPDATED ON 28/01/2026) 20/01/2026",
-    "result_date": "20/01/2026",
-    "url": "https://www.mumresults.in/S25/1113161 Master of Science(Information Technology) ( Semester - IV) ( NEP 2020 ) SUPPLEMENTARY.pdf"
-  }
+  "initialized": false,
+  "seen": []
 }
