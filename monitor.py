@@ -26,7 +26,7 @@ HEADERS = {
 
 
 def normalize(text):
-    return re.sub(r"\s+", " ", text or "").strip().lower()
+    return re.sub(r"\s+", " ", text or "").strip()
 
 
 def fetch_page():
@@ -41,41 +41,6 @@ def fetch_page():
     return response.text
 
 
-def find_session_table(soup):
-    """
-    Locate the table belonging to First Half 2026.
-    """
-
-    session_heading = None
-
-    for element in soup.find_all(
-        ["h1", "h2", "h3", "h4", "h5", "h6", "div", "p"]
-    ):
-        text = normalize(
-            element.get_text(" ", strip=True)
-        )
-
-        if text == normalize(TARGET_SESSION):
-            session_heading = element
-            break
-
-    if not session_heading:
-        print(
-            f"Session '{TARGET_SESSION}' not found."
-        )
-        return None
-
-    table = session_heading.find_next("table")
-
-    if not table:
-        print(
-            "Could not find results table."
-        )
-        return None
-
-    return table
-
-
 def find_results(html):
 
     soup = BeautifulSoup(
@@ -83,70 +48,55 @@ def find_results(html):
         "html.parser"
     )
 
-    table = find_session_table(soup)
-
-    if not table:
-        return []
-
     results = []
 
-    for row in table.find_all("tr"):
+    # Search every link on the page.
+    # Program Code 1113161 is the ONLY detection criterion.
+    for link in soup.find_all("a", href=True):
 
-        cells = row.find_all(
-            ["td", "th"]
+        link_text = normalize(
+            link.get_text(" ", strip=True)
         )
 
-        if not cells:
+        href = normalize(
+            link.get("href", "")
+        )
+
+        combined_text = (
+            f"{link_text} {href}"
+        )
+
+        if PROGRAM_CODE not in combined_text:
             continue
 
-        row_text = " ".join(
-            cell.get_text(
-                " ",
-                strip=True
-            )
-            for cell in cells
+        result_url = urljoin(
+            SITE_URL,
+            link["href"]
         )
 
-        normalized_row = normalize(
-            row_text
-        )
+        # Get the complete table row when available.
+        row = link.find_parent("tr")
 
-        # PROGRAM CODE IS THE ONLY RESULT FILTER.
-        if PROGRAM_CODE.lower() not in normalized_row:
-            continue
+        if row:
 
-        # Find the result/PDF link.
-        link = row.find(
-            "a",
-            href=True
-        )
-
-        result_url = None
-
-        if link:
-            result_url = urljoin(
-                SITE_URL,
-                link["href"]
+            row_text = normalize(
+                row.get_text(
+                    " ",
+                    strip=True
+                )
             )
 
-        # Try to identify the result date.
-        result_date = None
+        else:
 
-        if len(cells) >= 2:
-            result_date = cells[-1].get_text(
-                " ",
-                strip=True
-            )
+            row_text = link_text
 
-        result = {
-            "session": TARGET_SESSION,
-            "program_code": PROGRAM_CODE,
-            "row": row_text,
-            "result_date": result_date,
-            "url": result_url,
-        }
-
-        results.append(result)
+        results.append(
+            {
+                "program_code": PROGRAM_CODE,
+                "text": row_text,
+                "url": result_url,
+            }
+        )
 
     return results
 
@@ -154,11 +104,13 @@ def find_results(html):
 def load_state():
 
     if not STATE_FILE.exists():
+
         return {
             "seen": []
         }
 
     try:
+
         data = json.loads(
             STATE_FILE.read_text()
         )
@@ -169,6 +121,7 @@ def load_state():
         return data
 
     except Exception:
+
         return {
             "seen": []
         }
@@ -207,7 +160,8 @@ def telegram_send(message):
     if not token or not chat_id:
 
         print(
-            "Telegram credentials are not configured."
+            "ERROR: Telegram credentials "
+            "are not configured."
         )
 
         return
@@ -251,9 +205,8 @@ def main():
 
     print(
         f"Found {len(current_results)} "
-        f"listing(s) for program code "
-        f"{PROGRAM_CODE} in "
-        f"{TARGET_SESSION}."
+        f"listing(s) containing program code "
+        f"{PROGRAM_CODE}."
     )
 
     previous = load_state()
@@ -264,6 +217,10 @@ def main():
             []
         )
     )
+
+    # ---------------------------------------------------------
+    # CHECK FOR NEW RESULTS
+    # ---------------------------------------------------------
 
     new_results = []
 
@@ -282,89 +239,76 @@ def main():
                 )
             )
 
-    # First run after installing this version:
-    # establish existing listings as the baseline.
-    if not previous.get("initialized", False):
+    # ---------------------------------------------------------
+    # SEND NEW RESULTS
+    # ---------------------------------------------------------
 
-        for result in current_results:
-
-            seen.add(
-                create_fingerprint(result)
-            )
-
-        save_state(
-            {
-                "initialized": True,
-                "seen": list(seen),
-            }
-        )
-
-        print(
-            "Initial baseline created."
-        )
-
-        print(
-            f"{len(current_results)} existing "
-            f"listing(s) recorded."
-        )
-
-        return
-
-    # Alert only for genuinely NEW listings.
     if not new_results:
 
         print(
             "No new result listing detected."
         )
 
-        return
-
-    for fingerprint, result in new_results:
+    else:
 
         print(
-            "\nNEW RESULT FOUND:"
+            f"Found {len(new_results)} "
+            f"new result listing(s)."
         )
 
-        print(
-            json.dumps(
-                result,
-                indent=2,
-                ensure_ascii=False
-            )
-        )
+        for fingerprint, result in new_results:
 
-        message = (
-            "🚨 Mumbai University Result Alert\n\n"
-            "NEW RESULT FOUND!\n\n"
-            f"Session: {TARGET_SESSION}\n"
-            f"Program Code: {PROGRAM_CODE}\n"
-            f"Result Date: "
-            f"{result.get('result_date') or 'Not shown'}\n\n"
-            f"Listing: {SITE_URL}"
-        )
-
-        if result.get("url"):
-
-            message += (
-                f"\nPDF/Result: "
-                f"{result['url']}"
+            print(
+                "\nNEW RESULT FOUND:"
             )
 
-        telegram_send(message)
+            print(
+                json.dumps(
+                    result,
+                    indent=2,
+                    ensure_ascii=False
+                )
+            )
 
-        seen.add(
-            fingerprint
-        )
+            message = (
+                "🚨 Mumbai University Result Alert\n\n"
+                "NEW RESULT FOUND!\n\n"
+                f"Program Code: {PROGRAM_CODE}\n\n"
+                f"Details:\n"
+                f"{result.get('text') or 'Not available'}\n\n"
+                f"Listing: {SITE_URL}"
+            )
 
-        print(
-            "TELEGRAM ALERT SENT."
-        )
+            if result.get("url"):
+
+                message += (
+                    f"\n\nPDF/Result:\n"
+                    f"{result['url']}"
+                )
+
+            telegram_send(message)
+
+            seen.add(
+                fingerprint
+            )
+
+            print(
+                "TELEGRAM ALERT SENT."
+            )
+
+    # ---------------------------------------------------------
+    # SAVE ALL SEEN RESULTS
+    # ---------------------------------------------------------
 
     save_state(
         {
-            "initialized": True,
-            "seen": list(seen),
+            "seen": list(seen)
         }
+    )
+
+    print(
+        f"Monitor state saved. "
+        f"Total unique listing(s) tracked: {len(seen)}"
     )
 
 
