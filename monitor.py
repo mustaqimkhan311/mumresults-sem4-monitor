@@ -15,9 +15,6 @@ SITE_URL = "https://www.mumresults.in/"
 
 PROGRAM_CODE = "1113161"
 
-# We only monitor the current First Half 2026 section.
-TARGET_SESSION = "First Half 2026"
-
 STATE_FILE = Path("state.json")
 
 HEADERS = {
